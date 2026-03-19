@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesna PDF Cracker</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <!-- Load Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="background-mesh">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <div class="container">
+        <header>
+            <h1><i class="fa-solid fa-unlock-keyhole"></i> MESNA PDF CRACKER</h1>
+            <p>Unlock your encrypted PDF files using dictionary attacks with a premium, blazing fast tool.</p>
+        </header>
+
+        <main class="glass-panel">
+            <form id="crackForm" enctype="multipart/form-data">
+                
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="pdf_file" name="pdf_file" accept=".pdf" required hidden>
+                    <i class="fa-regular fa-file-pdf upload-icon"></i>
+                    <h3>Drag & Drop your protected PDF here</h3>
+                    <p>or click to browse</p>
+                    <span id="fileNameDisplay" class="file-name"></span>
+                </div>
+
+                <div class="mode-selector" style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1rem; background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 12px; border: 1px solid var(--glass-border);">
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;">
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="radio" name="crack_mode" value="dict" checked onchange="toggleMode()"> 
+                            <i class="fa-solid fa-book"></i> Dictionary
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="radio" name="crack_mode" value="numeric" onchange="toggleMode()"> 
+                            <i class="fa-solid fa-mobile-screen"></i> Numeric PIN
+                        </label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="radio" name="crack_mode" value="dob" onchange="toggleMode()"> 
+                            <i class="fa-solid fa-calendar-days"></i> Dates of Birth
+                        </label>
+                    </div>
+
+                    <div id="pinLengthGroup" style="display: none; text-align: center; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem; margin-top: 0.5rem;">
+                        <label for="pin_length" style="font-weight: 600; margin-right: 1rem; color: var(--text-main);">Select PIN Length:</label>
+                        <select id="pin_length" name="pin_length" style="background: rgba(0,0,0,0.5); color: white; padding: 0.5rem; border: 1px solid var(--glass-border); border-radius: 8px; font-size: 1rem; font-family: inherit; outline: none;">
+                            <option value="4">4 Digits (10,000)</option>
+                            <option value="5">5 Digits (100,000)</option>
+                            <option value="6" selected>6 Digits (1,000,000)</option>
+                            <option value="7">7 Digits (10,000,000)</option>
+                            <option value="8">8 Digits (100,000,000)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="input-group" id="dictInputGroup">
+                    <label for="passwords"><i class="fa-solid fa-list"></i> Passwords (One per line)</label>
+                    <textarea id="passwords" name="passwords" rows="6" placeholder="password123&#10;admin&#10;123456&#10;qwerty"></textarea>
+                </div>
+
+                <script>
+                    function toggleMode() {
+                        const mode = document.querySelector('input[name="crack_mode"]:checked').value;
+                        const dictGroup = document.getElementById('dictInputGroup');
+                        const passInput = document.getElementById('passwords');
+                        const pinGroup = document.getElementById('pinLengthGroup');
+                        
+                        if (mode === 'numeric') {
+                            dictGroup.style.display = 'none';
+                            passInput.required = false;
+                            pinGroup.style.display = 'block';
+                        } else if (mode === 'dob') {
+                            dictGroup.style.display = 'none';
+                            passInput.required = false;
+                            pinGroup.style.display = 'none';
+                        } else {
+                            dictGroup.style.display = 'block';
+                            passInput.required = true;
+                            pinGroup.style.display = 'none';
+                        }
+                    }
+                    // Run on load
+                    toggleMode();
+                </script>
+
+                <button type="submit" id="submitBtn" class="btn-primary">
+                    <span class="btn-text">Start Brute Force</span>
+                    <i class="fa-solid fa-bolt"></i>
+                </button>
+            </form>
+
+            <div id="loading" class="loading-container hidden">
+                <div class="spinner"></div>
+                <h2>Opening PDF... Please wait</h2>
+                
+                <div id="liveStats" class="live-stats hidden">
+                    <div class="stat-box">
+                        <i class="fa-solid fa-clock"></i>
+                        <span id="liveTime">00:00:00</span>
+                    </div>
+                    <div class="stat-box">
+                        <i class="fa-solid fa-terminal"></i>
+                        <span>Testing: <strong id="liveAttempt" style="color: var(--secondary); letter-spacing: 2px;">000000</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="result" class="result-container hidden">
+                <h3 id="resultTitle"></h3>
+                <div id="resultContent" class="result-content"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+.env
+.venv/
+
+# Flask uploads
+uploads/
+*.pdf
+
+# IDEs and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
