@@ -4,6 +4,7 @@ import math
 import datetime
 import concurrent.futures
 import pikepdf
+import io
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.utils import secure_filename
 
@@ -12,18 +13,17 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 def check_chunk(args):
-    filepath, chunk = args
+    pdf_bytes, chunk = args
     # Test each password in this chunk
     for pwd in chunk:
         try:
-            # pikepdf uses the high-speed qpdf C++ library
-            with pikepdf.open(filepath, password=pwd):
+            # Use io.BytesIO to open PDF from memory (avoiding disk I/O)
+            with pikepdf.open(io.BytesIO(pdf_bytes), password=pwd):
                 pass
             return pwd
-        except pikepdf.PasswordError:
+        except (pikepdf.PasswordError, pikepdf.PdfError):
             continue
         except Exception:
-            # Catch other potential read errors if the file is truly broken
             continue
     return None
 
@@ -68,47 +68,107 @@ def crack_pdf():
         except pikepdf.PasswordError:
             pass # It is encrypted, proceed!
 
-        # Prepare the list of passwords to try
+        # Prepare the list of passwords to try (using generators for large sets)
         if crack_mode == 'numeric':
-            passwords = [f"{i:0{pin_length}d}" for i in range(10**pin_length)]
+            passwords = (f"{i:0{pin_length}d}" for i in range(10**pin_length))
+            total_passwords = 10**pin_length
         elif crack_mode == 'dob':
             start_date = datetime.date(1900, 1, 1)
             end_date = datetime.date(2027, 1, 1)
             delta = datetime.timedelta(days=1)
-            passwords = []
-            while start_date < end_date:
-                # Add multiple common formats
-                passwords.append(start_date.strftime("%d%m%Y"))
-                passwords.append(start_date.strftime("%m%d%Y"))
-                passwords.append(start_date.strftime("%Y%m%d"))
-                passwords.append(start_date.strftime("%d%m%y")) # shorter formats
-                passwords.append(start_date.strftime("%m%d%y"))
-                start_date += delta
-            # Remove duplicates just in case
-            passwords = list(dict.fromkeys(passwords))
+            
+            def dob_generator():
+                curr_date = start_date
+                seen = set()
+                while curr_date < end_date:
+                    formats = ["%d%m%Y", "%m%d%Y", "%Y%m%d", "%d%m%y", "%m%d%y"]
+                    for fmt in formats:
+                        pwd = curr_date.strftime(fmt)
+                        if pwd not in seen:
+                            seen.add(pwd)
+                            yield pwd
+                    curr_date += delta
+            
+            passwords = dob_generator()
+            # Approximate count for chunking
+            total_passwords = (end_date - start_date).days * 5
         else:
-            passwords = [p.strip() for p in passwords_text.split('\n') if p.strip()]
+            p_list = [p.strip() for p in passwords_text.split('\n') if p.strip()]
+            passwords = iter(p_list)
+            total_passwords = len(p_list)
 
-        # Split the passwords into smaller chunks
-        num_cores = max(1, (os.cpu_count() or 4) - 1) # Keep 1 core free for OS/Flask
-        chunk_size = 5000 
-        chunks = [passwords[i:i + chunk_size] for i in range(0, len(passwords), chunk_size)]
+        # Read PDF into memory once
+        with open(filepath, 'rb') as f:
+            pdf_bytes = f.read()
+
+        # Dynamic chunk size based on total passwords and cores
+        num_cores = max(1, (os.cpu_count() or 4) - 1)
+        if total_passwords > 1000000:
+            chunk_size = 10000
+        elif total_passwords > 100000:
+            chunk_size = 5000
+        else:
+            chunk_size = 2000
+
+        # Helper to yield chunks from a generator
+        def chunked_iterable(iterable, size):
+            it = iter(iterable)
+            while True:
+                chunk = []
+                try:
+                    for _ in range(size):
+                        chunk.append(next(it))
+                    yield chunk
+                except StopIteration:
+                    if chunk:
+                        yield chunk
+                    break
+
+        chunks = chunked_iterable(passwords, chunk_size)
         
-        args_list = [(filepath, c) for c in chunks]
-
         start_time = time.time()
         found_password = None
         attempts_count = 0
 
         # Execute chunks across multiple CPU cores
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_cores) as executor:
-            future_to_chunk = {executor.submit(check_chunk, arg): arg for arg in args_list}
-            for future in concurrent.futures.as_completed(future_to_chunk):
-                attempts_count += len(future_to_chunk[future][1])
-                res = future.result()
-                if res is not None:
-                    found_password = res
+            # We use a set of futures and wait for completion/found password
+            active_futures = set()
+            
+            # Submit initial batch
+            for _ in range(num_cores * 2):
+                try:
+                    chunk = next(chunks)
+                    active_futures.add(executor.submit(check_chunk, (pdf_bytes, chunk)))
+                except StopIteration:
                     break
+            
+            while active_futures:
+                done, active_futures = concurrent.futures.wait(
+                    active_futures, return_when=concurrent.futures.FIRST_COMPLETED
+                )
+                
+                for future in done:
+                    res = future.result()
+                    if res is not None:
+                        found_password = res
+                        # Cancel remaining futures if supported
+                        for f in active_futures:
+                            f.cancel()
+                        active_futures = set()
+                        break
+                    
+                    # Submit next chunk if more available
+                    try:
+                        next_chunk = next(chunks)
+                        attempts_count += chunk_size
+                        active_futures.add(executor.submit(check_chunk, (pdf_bytes, next_chunk)))
+                    except StopIteration:
+                        pass
+
+        # Final count of attempts (approximate for display)
+        if not attempts_count:
+             attempts_count = total_passwords
                 
         elapsed = time.time() - start_time
         
@@ -155,6 +215,24 @@ def crack_pdf():
                 pass
         return jsonify({'error': str(e)}), 500
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log the error and return a JSON error message
+    print(f"Unhandled Exception: {e}")
+    return jsonify({
+        'success': False,
+        'error': 'An internal server error occurred.',
+        'details': str(e)
+    }), 500
+
 if __name__ == '__main__':
-    # Important for Windows multiprocessing
-    app.run(host='0.0.0.0', debug=True, port=5000)
+    # Try to run on port 5000, but handle cases where it might be blocked
+    try:
+        print("\n" + "="*50)
+        print("MESNA PDF CRACKER IS STARTING...")
+        print("Link: http://127.0.0.1:5000")
+        print("="*50 + "\n")
+        app.run(host='0.0.0.0', debug=True, port=5000)
+    except Exception as e:
+        print(f"ERROR: Could not start server on port 5000. It might be in use by another app.")
+        print(f"Technical details: {e}")
